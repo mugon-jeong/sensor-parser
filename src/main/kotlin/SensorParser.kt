@@ -3,7 +3,9 @@ package org.example
 import kotlin.reflect.KClass
 import kotlin.reflect.KParameter
 import kotlin.reflect.full.findAnnotation
+import kotlin.reflect.full.isSubclassOf
 import kotlin.reflect.full.primaryConstructor
+import kotlin.reflect.full.superclasses
 
 class SensorParser<T : Any>(private val kClass: KClass<T>) {
     fun parse(data: ByteArray): T {
@@ -20,7 +22,7 @@ class SensorParser<T : Any>(private val kClass: KClass<T>) {
         }.sortedBy { it.second.order }
 
         // 정렬된 필드를 기반으로 인자를 구성
-        val args = mutableMapOf<KParameter, Any?>()
+        val args = mutableMapOf<KParameter, Any>()
         var offset = 0
 
         for ((parameter, annotation) in sortedParameters) {
@@ -31,11 +33,22 @@ class SensorParser<T : Any>(private val kClass: KClass<T>) {
             val valueAsInt = data.sliceArray(offset until offset + annotation.size).toInt()
 
             // 자른 데이터를 실제로 파싱하여 각 필드의 값을 추출
-            val parsedValue: Any? = when (parameter.type.classifier) {
-                FireType::class -> FireType.entries.firstOrNull { it.value == valueAsInt } ?: FireType.UNKNOWN // Enum 타입일 경우
+            val parsedValue: Any = when (val type = parameter.type.classifier) {
+//                FireType::class -> FireType.entries.firstOrNull { it.value == valueAsInt } ?: FireType.UNKNOWN // Enum 타입일 경우
                 Boolean::class -> valueAsInt != 0 // Boolean 타입일 경우
                 Int::class -> valueAsInt // Int 타입일 경우
-                else -> null // 기타 타입에 대해서는 추가 구현 필요
+                is KClass<*> -> {
+                    if (type.superclasses.contains(SensorType::class)) {
+                        val sensorTypeParser = SensorTypeParser(type as KClass<out SensorType>)
+                        sensorTypeParser.parse(valueAsInt)
+                    } else {
+                        throw IllegalArgumentException("Unsupported type: $type")
+                    }
+                }
+
+                else -> {
+                    throw IllegalArgumentException("Unsupported type: $type")
+                }
             }
 
             args[parameter] = parsedValue
